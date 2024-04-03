@@ -552,4 +552,16 @@ def TopologicalSort : Pass<"topological-sort"> {
   let constructor = "mlir::createTopologicalSortPass()";
 }
 
+def GraphPartition : Pass<"graph-partition"> {
+  let summary = "Partition for graph of operation";
+  let description = [{
+    Partition.
+  }];
+  let options = [
+    Option<"maxNumParts", "max-num-parts", "unsigned",
+            /*default=*/"120", "Maximal number of parts">
+  ];
+  let constructor = "mlir::createGraphPartitionPass()";
+}
+
 #endif // MLIR_TRANSFORMS_PASSES
