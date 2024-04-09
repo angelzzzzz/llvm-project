@@ -92,6 +92,7 @@ inline void registerAllPasses() {
   arm_sme::registerArmSMEPasses();
   arm_sve::registerArmSVEPasses();
   emitc::registerEmitCPasses();
+  registerGraphPartition();
 
   // Dialect pipelines
   bufferization::registerBufferizationPipelines();
