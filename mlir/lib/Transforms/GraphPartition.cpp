@@ -42,6 +42,7 @@ namespace {
 
 class PartitionPass : public impl::GraphPartitionBase<PartitionPass> {
   using CFNode = std::vector<Block *>;
+  using BlockEdge = std::tuple<Block *, Block *>;
 
 public:
   PartitionPass(raw_ostream &os) : os(os) {}
@@ -76,10 +77,6 @@ public:
       }
     }
 
-    // if (preEndBlock != sucEndBlock) {
-    //   llvm::errs() << "End block search failed.\n";
-    //   return nullptr;
-    // }
     return endBlock;
   }
 
@@ -114,27 +111,6 @@ public:
 
   void runOnOperation() override {
     Operation *op = getOperation();
-
-    // PassManager pm(op->getName());
-
-    // pm.addPass(createInlinerPass());
-    // pm.addPass(createCSEPass());
-    // pm.addPass(createControlFlowSinkPass());
-    // pm.addPass(createSCCPPass());
-    // pm.addPass(createSymbolDCEPass());
-
-    // if (!mlir::succeeded(pm.run(op))) {
-    //   op->emitOpError() << "pipeline fail";
-    // }
-
-    // auto blocks = op->getBlockOperands();
-
-    // auto *node = domInfo.getNode(op->getBlock());
-    // node->getBlock()->dump();
-    // auto *dt = df.getRootNode(op->getRegions().end());
-    // auto *node = df.getNode(op->getBlock());
-    // mlir::emitError(op->getLoc(), std::to_string(node->getNumChildren()));
-    // node->getBlock()->dump();
 
     op->walk([&](mlir::LLVM::CallOp callOp) {
       // callOp->dump();
@@ -178,52 +154,12 @@ public:
       if (visitedBlock[block])
         return;
 
-      if (block->getNumSuccessors() > 1) {
-        addBlock(block, cfn, domInfo, postDomInfo);
-        cfNodes.push_back(cfn);
-        return;
-      }
-
-      cfn.push_back(block);
+      addBlock(block, cfn, domInfo, postDomInfo);
       cfNodes.push_back(cfn);
     });
 
-    // op->walk([&](Operation *op) {
-    //   DominanceInfo domInfo(op);
-    //   PostDominanceInfo postDomInfo(op);
-    //   Block *block = op->getBlock();
-
-    //   if (visitedBlock[block])
-    //     return;
-
-    //   if (llvm::isa<LLVM::CondBrOp>(op)) {
-
-    //     CFNode cfn;
-
-    //     // // Create a new block containing CondBrOp.
-    //     // OpBuilder builder(&context);
-    //     // Block *condBrBlock = new Block();
-    //     // op->moveBefore(&condBrBlock->front());
-
-    //     auto *endBlock = addBlock(block, cfn, domInfo, postDomInfo);
-
-    //     // llvm::errs() << "endBlock:\n";
-    //     // endBlock->dump();
-
-    //     cfNodes.push_back(cfn);
-    //   }
-    // });
-
     cfNodes.pop_back();
     // TODO: Remove the last block.
-
-    // llvm::errs() << "cfNodes_num:" << cfNodes.size() << "\n";
-    // for (const auto &cfNode : cfNodes) {
-    //   llvm::errs() << "num:" << cfNode.size() << "\n";
-    //   // for (auto *block : cfNode) {
-    //   //   block->dump();
-    //   // }
-    // }
 
     printControlFlowNodes();
   }
@@ -237,12 +173,8 @@ private:
   /// A structure for storing control flow nodes.
   std::vector<CFNode> cfNodes;
 
-  std::vector<std::tuple<Block *, Block *>> blockEdges;
+  std::vector<BlockEdge> blockEdges;
 
-  // DominanceInfo &domInfo = getAnalysis<DominanceInfo>();
-  // PostDominanceInfo &postDomInfo = getAnalysis<PostDominanceInfo>();
-
-  // std::vector<Block *> visitedCondBrBlock;
   DenseMap<Block *, bool> visitedBlock;
 
   DenseMap<Block *, int> blockToId;
