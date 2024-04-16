@@ -112,14 +112,6 @@ public:
   void runOnOperation() override {
     Operation *op = getOperation();
 
-    op->walk([&](mlir::LLVM::CallOp callOp) {
-      // callOp->dump();
-      auto callee = callOp.getCalleeAttr();
-      auto func = llvm::dyn_cast_or_null<LLVM::LLVMFuncOp>(
-          SymbolTable::lookupNearestSymbolFrom(op, callee));
-      calleeList.push_back(func);
-    });
-
     PassManager pm(op->getName());
 
     pm.addPass(createInlinerPass());
@@ -128,9 +120,20 @@ public:
       op->emitOpError() << "pipeline fail";
     }
 
-    for (auto func : calleeList) {
-      func.setPrivate();
+    bool foundMainFunction = false;
+    op->walk([&](LLVM::LLVMFuncOp func) {
+      if (func.getName() != mainFunctionName) {
+        func.setPrivate();
+      } else {
+        foundMainFunction = true;
+      }
+    });
+    if (!foundMainFunction) {
+      mlir::emitError(op->getLoc(),
+                      "Main function " + mainFunctionName + " not found!\n");
+      return;
     }
+
     pm.addPass(createCSEPass());
     pm.addPass(createControlFlowSinkPass());
     pm.addPass(createSCCPPass());
@@ -159,7 +162,7 @@ public:
     });
 
     cfNodes.pop_back();
-    // TODO: Remove the last block.
+    // TODO: Handling redundant blocks instead of popping them up.
 
     printControlFlowNodes();
   }

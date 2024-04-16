@@ -576,7 +576,9 @@ def GraphPartition : Pass<"graph-partition"> {
   }];
   let options = [
     Option<"maxNumParts", "max-num-parts", "unsigned",
-            /*default=*/"120", "Maximal number of parts">
+            /*default=*/"120", "Maximal number of parts (default: 120)">,
+    Option<"mainFunctionName","main-function-name","std::string",
+            /*default=*/"\"main\"","The name of the main function (default: main)">
   ];
   let constructor = "mlir::createGraphPartitionPass()";
 }
