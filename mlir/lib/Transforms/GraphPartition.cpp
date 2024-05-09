@@ -1,6 +1,7 @@
 #include "mlir/Transforms/GraphPartition.h"
 
 #include "mlir-c/IR.h"
+#include "mlir/Analysis/Liveness.h"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -22,8 +23,11 @@
 #include "mlir/Support/IndentedOstream.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Passes.h"
+#include "llvm/Analysis/CostModel.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IntrinsicsMips.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
@@ -143,10 +147,30 @@ public:
       op->emitOpError() << "pipeline fail";
     }
 
+    // function---------------------------------//
+
+    SymbolTable symbolTable(op);
+
+    // 也许可以利用这个在 inline 后找到 main 函数分析，无需删除其他函数
+    // LLVM::LLVMFuncOp mainFunc =
+    //     symbolTable.lookup<LLVM::LLVMFuncOp>(mainFunctionName);
+
+    // 打印指定function的op graph，以dot形式存储在文件中
+    // mainFunc->getRegion(0).viewGraph();
+
+    llvm::errs() << "after-getNumRegions:" << op->getNumRegions() << "\n";
+
+    // -----------------------------------------//
+
+    Liveness live(op);
+
     op->walk([&](Block *block) {
       DominanceInfo domInfo;
       PostDominanceInfo postDomInfo;
       CFNode cfn;
+
+      auto num = block->getOperations().size();
+      llvm::errs() << "code_size:" << num << "\n";
 
       blockToId[block] = numBlock++;
 
@@ -158,13 +182,34 @@ public:
         return;
 
       addBlock(block, cfn, domInfo, postDomInfo);
+
+      // Don't include the end block that is in the next node.
       cfNodes.push_back(cfn);
+
+      // llvm::errs() << "******************************\n";
+
+      // // block->dump();
+      // // llvm::errs() << "\n";
+
+      // // for (auto value : live.getLiveIn(block)) {
+      // //   value.dump();
+      // //   llvm::errs() << "\n";
+      // // }
+
+      // const auto &liveInValues = live.getLiveIn(block);
+      // // node.setLiveIn()
+
+      // llvm::errs() << "num-live-in-value:" << liveInValues.size() << "\n";
+      // llvm::errs() << "num-block:" << cfn.size() << "\n";
+
+      // llvm::errs() << "******************************\n";
     });
 
+    // The last node is the whole function that needs to be popped.
     cfNodes.pop_back();
     // TODO: Handling redundant blocks instead of popping them up.
 
-    printControlFlowNodes();
+    // printControlFlowNodes();
   }
 
 private:
@@ -187,6 +232,12 @@ private:
 };
 
 } // namespace
+
+void Node::calculateCost(Block *block) {}
+
+void Node::calculateSpaceCost(Block *block) {}
+
+void Node::calculateTimingCost(Block *block) {}
 
 std::unique_ptr<Pass> mlir::createGraphPartitionPass(raw_ostream &os) {
   return std::make_unique<PartitionPass>(os);

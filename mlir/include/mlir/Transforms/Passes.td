@@ -577,8 +577,12 @@ def GraphPartition : Pass<"graph-partition"> {
   let options = [
     Option<"maxNumParts", "max-num-parts", "unsigned",
             /*default=*/"120", "Maximal number of parts (default: 120)">,
-    Option<"mainFunctionName","main-function-name","std::string",
-            /*default=*/"\"main\"","The name of the main function (default: main)">
+    Option<"mainFunctionName", "main-function-name", "std::string",
+            /*default=*/"\"main\"", "The name of the main function (default: main)">,
+    Option<"loopTimes", "loop-times", "unsigned", 
+            /*default=*/"10", "Estimated times of loop">,
+    Option<"maxCodeSize", "max-code-size", "unsigned",
+            /*default=*/"128", "Maximal size of the code of subgraph">
   ];
   let constructor = "mlir::createGraphPartitionPass()";
 }
