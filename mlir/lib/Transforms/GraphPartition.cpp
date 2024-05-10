@@ -472,7 +472,6 @@ void Node::calculateTimingCost(Block *block) {
     .Case([](LLVM::masked_scatter op){return TCC_Basic;})
     .Case([](LLVM::vector_extract op){return TCC_Basic;})
     .Case([](LLVM::vector_insert op){return TCC_Basic;})
-    .Case([](LLVM::vector_interleave2 op){return TCC_Basic;})
     .Case([](LLVM::vector_reduce_add op){return TCC_Basic;})
     .Case([](LLVM::vector_reduce_and op){return TCC_Basic;})
     .Case([](LLVM::vector_reduce_fadd op){return TCC_Basic;})
