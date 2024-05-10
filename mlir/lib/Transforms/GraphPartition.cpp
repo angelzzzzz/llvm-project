@@ -25,6 +25,7 @@
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Analysis/CostModel.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/IntrinsicsMips.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -233,11 +234,50 @@ private:
 
 } // namespace
 
-void Node::calculateCost(Block *block) {}
+void Node::calculateCost(Block *block) {
 
-void Node::calculateSpaceCost(Block *block) {}
+}
 
-void Node::calculateTimingCost(Block *block) {}
+void Node::calculateSpaceCost(Block *block) {
+  spaceCost = block->getOperations().size() * SIZE_TRANSFORM_PARAMETER;
+}
+
+void Node::calculateTimingCost(Block *block) {
+  timingCost = 0;
+  block->walk([&](Operation *op) {
+    TargetCostConstants operationCost = TypeSwitch<Operation *, TargetCostConstants>(op)
+    .Case([](LLVM::AShrOp op){return TCC_Basic;})
+    .Case([](LLVM::AddOp op){return TCC_Basic;})
+    .Case([](LLVM::AddrSpaceCastOp op){return TCC_Basic;})
+    .Case([](LLVM::AddressOfOp op){return TCC_Basic;})
+    .Case([](LLVM::AllocaOp op){return TCC_Basic;})
+    .Case([](LLVM::AndOp op){return TCC_Basic;})
+    .Case([](LLVM::AtomicCmpXchgOp op){return TCC_Basic;})
+    .Case([](LLVM::AtomicRMWOp op){return TCC_Basic;})
+    .Case([](LLVM::BitcastOp op){return TCC_Basic;})
+    .Case([](LLVM::BrOp op){return TCC_Basic;})
+    .Case([](LLVM::CallIntrinsicOp op){return TCC_Basic;})
+    .Case([](LLVM::CallOp op){return TCC_Basic;})
+    .Case([](LLVM::ComdatOp op){return TCC_Basic;})
+    .Case([](LLVM::ComdatSelectorOp op){return TCC_Basic;})
+    .Case([](LLVM::CondBrOp op){return TCC_Basic;})
+    .Case([](LLVM::ConstantOp op){return TCC_Basic;})
+    .Case([](LLVM::ExtractElementOp op){return TCC_Basic;})
+    .Case([](LLVM::ExtractValueOp op){return TCC_Basic;})
+    .Case([](LLVM::FCmpOp op){return TCC_Basic;})
+    .Case([](LLVM::FDivOp op){return TCC_Basic;})
+    .Case([](LLVM::FMulOp op){return TCC_Basic;})
+    .Case([](LLVM::FNegOp op){return TCC_Basic;})
+    .Case([](LLVM::FPExtOp op){return TCC_Basic;})
+    .Case([](LLVM::FPToSIOp op){return TCC_Basic;})
+    .Case([](LLVM::FPToUIOp op){return TCC_Basic;})
+    .Case([](LLVM::FPTruncOp op){return TCC_Basic;})
+    .Case([](LLVM::FSubOp op){return TCC_Basic;})
+    .Case([](LLVM::FenceOp op){return TCC_Basic;})
+    .Case([](LLVM::FreezeOp op){return TCC_Basic;})
+    ;
+    timingCost += operationCost;});   
+}
 
 std::unique_ptr<Pass> mlir::createGraphPartitionPass(raw_ostream &os) {
   return std::make_unique<PartitionPass>(os);

@@ -1,6 +1,10 @@
 #ifndef MLIR_TRANSFORMS_GRAPHPARTITION_H_
 #define MLIR_TRANSFORMS_GRAPHPARTITION_H_
 
+#ifndef SIZE_TRANSFORM_PARAMETER
+#define SIZE_TRANSFORM_PARAMETER 3.2
+#endif
+
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Value.h"
@@ -13,6 +17,7 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#include "llvm/ADT/TypeSwitch.h"
 
 namespace mlir {
 class Pass;
@@ -46,13 +51,19 @@ private:
   // Control flow nodes containing minimum blocks without branches.
   SmallVector<Block *, 8> basicBlocks;
   // dynamic instructions
-  int64_t timingCost;
+  unsigned long timingCost;
   // static instructions
-  int64_t spaceCost;
+  unsigned long spaceCost;
   // The set of values that are live at the entry of the node.
   SmallPtrSet<Value, 16> inValues;
   // The set of values that are live at the exit of the node.
   SmallPtrSet<Value, 16> outValues;
+  // Underlying constants for 'cost' values in this interface.
+  enum TargetCostConstants {
+  TCC_Free = 0,     ///< Expected to fold away in lowering.
+  TCC_Basic = 1,    ///< The cost of a typical 'add' instruction.
+  TCC_Expensive = 4 ///< The cost of a 'div' instruction on x86.
+  };
 };
 
 // The subgraph of graph, containing several nodes.
@@ -65,8 +76,8 @@ public:
 
 private:
   SmallVector<Node *, 16> nodes;
-  int64_t timingCost;
-  int64_t spaceCost;
+  unsigned long timingCost;
+  unsigned long spaceCost;
 };
 
 class Graph {
