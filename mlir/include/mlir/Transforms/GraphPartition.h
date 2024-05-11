@@ -12,12 +12,12 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/raw_ostream.h"
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
-#include "llvm/ADT/TypeSwitch.h"
 
 namespace mlir {
 class Pass;
@@ -46,6 +46,7 @@ private:
   void calculateSpaceCost(Block *);
   // use -loop-times
   void calculateTimingCost(Block *);
+  void calculateTimingCost(Block *, int64_t, int64_t, int64_t);
 
 private:
   // Control flow nodes containing minimum blocks without branches.
