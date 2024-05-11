@@ -59,11 +59,6 @@ private:
   // The set of values that are live at the exit of the node.
   SmallPtrSet<Value, 16> outValues;
   // Underlying constants for 'cost' values in this interface.
-  enum TargetCostConstants {
-  TCC_Free = 0,     ///< Expected to fold away in lowering.
-  TCC_Basic = 1,    ///< The cost of a typical 'add' instruction.
-  TCC_Expensive = 4 ///< The cost of a 'div' instruction on x86.
-  };
 };
 
 // The subgraph of graph, containing several nodes.

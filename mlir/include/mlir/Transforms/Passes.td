@@ -582,7 +582,13 @@ def GraphPartition : Pass<"graph-partition"> {
     Option<"loopTimes", "loop-times", "unsigned", 
             /*default=*/"10", "Estimated times of loop">,
     Option<"maxCodeSize", "max-code-size", "unsigned",
-            /*default=*/"128", "Maximal size of the code of subgraph">
+            /*default=*/"128", "Maximal size of the code of subgraph">,
+    Option<"freeCycleCost", "free-cycle", "unsigned",
+            /*default=*/"0", "Expected to fold away in lowering.">,
+    Option<"basicCycleCost", "basic-cycle", "unsigned",
+            /*default=*/"1", "The cost of a typical 'add' instruction.">,
+    Option<"expensiveCycleCost", "expensive-cycle", "unsigned",
+            /*default=*/"4", "The cost of a 'div' instruction on x86.">
   ];
   let constructor = "mlir::createGraphPartitionPass()";
 }
