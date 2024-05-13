@@ -33,7 +33,8 @@ public:
 
   // Calculate the block costs and add them to timingCost and spaceCost.
   // This only calculates the cost of one block in the node.
-  void calculateCost(Block *);
+  void calculateCost(Block *, int64_t freeCycle, int64_t basicCycle,
+                     int64_t expensiveCycle);
 
   void setLiveIn(const SmallPtrSet<Value, 16> &values) { inValues = values; }
   void setLiveOut(const SmallPtrSet<Value, 16> &values) { outValues = values; }
@@ -45,7 +46,6 @@ public:
 private:
   void calculateSpaceCost(Block *);
   // use -loop-times
-  void calculateTimingCost(Block *);
   void calculateTimingCost(Block *, int64_t, int64_t, int64_t);
 
 private:

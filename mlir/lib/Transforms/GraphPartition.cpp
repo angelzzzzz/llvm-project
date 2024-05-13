@@ -235,7 +235,11 @@ private:
 
 } // namespace
 
-void Node::calculateCost(Block *block) {}
+void Node::calculateCost(Block *block, int64_t freeCycle, int64_t basicCycle,
+                         int64_t expensiveCycle) {
+  calculateSpaceCost(block);
+  calculateTimingCost(block, freeCycle, basicCycle, expensiveCycle);
+}
 
 void Node::calculateSpaceCost(Block *block) {
   spaceCost = block->getOperations().size() * SIZE_TRANSFORM_PARAMETER;
@@ -243,6 +247,7 @@ void Node::calculateSpaceCost(Block *block) {
 
 void Node::calculateTimingCost(Block *block, int64_t freeCycle,
                                int64_t basicCycle, int64_t expensiveCycle) {
+  timingCost = 0;
   block->walk([&](Operation *op) {
     int64_t operationCost =
         TypeSwitch<Operation *, unsigned>(op)
