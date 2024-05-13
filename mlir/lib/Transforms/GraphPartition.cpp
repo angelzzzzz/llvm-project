@@ -246,15 +246,12 @@ void Node::calculateTimingCost(Block *block, int64_t freeCycle,
   block->walk([&](Operation *op) {
     int64_t operationCost =
         TypeSwitch<Operation *, unsigned>(op)
-            .Case([&](LLVM::AShrOp op) { return basicCycle; })
-            .Case([&](LLVM::AddOp op) { return basicCycle; })
-            .Case([&](LLVM::AddrSpaceCastOp op) { return basicCycle; })
-            .Case([&](LLVM::AddressOfOp op) { return basicCycle; })
-            .Case([&](LLVM::AllocaOp op) { return basicCycle; })
-            .Case([&](LLVM::AndOp op) { return basicCycle; })
-            .Case([&](LLVM::AtomicCmpXchgOp op) { return expensiveCycle; })
-            .Case([&](LLVM::AtomicRMWOp op) { return expensiveCycle; })
-            .Case([&](LLVM::BitcastOp op) { return basicCycle; })
+            .Case<LLVM::AShrOp, LLVM::AddOp, LLVM::AddrSpaceCastOp,
+                  LLVM::AddressOfOp, LLVM::AllocaOp, LLVM::AndOp,
+                  LLVM::BitcastOp>([&](auto op) { return basicCycle; })
+            .Case<LLVM::MatrixMultiplyOp, LLVM::MemcpyOp, LLVM::MemmoveOp,
+                  LLVM::AtomicCmpXchgOp, LLVM::AtomicRMWOp>(
+                [&](auto op) { return expensiveCycle; })
             .Case([&](LLVM::BrOp op) { return basicCycle; })
             .Case([&](LLVM::CallIntrinsicOp op) { return freeCycle; })
             .Case([&](LLVM::CallOp op) { return freeCycle; })
@@ -376,13 +373,11 @@ void Node::calculateTimingCost(Block *block, int64_t freeCycle,
             .Case([&](LLVM::MatrixColumnMajorStoreOp op) {
               return expensiveCycle;
             })
-            .Case([&](LLVM::MatrixMultiplyOp op) { return expensiveCycle; })
+
             .Case([&](LLVM::MatrixTransposeOp op) { return basicCycle; })
             .Case([&](LLVM::MaxNumOp op) { return basicCycle; })
             .Case([&](LLVM::MaximumOp op) { return basicCycle; })
             .Case([&](LLVM::MemcpyInlineOp op) { return basicCycle; })
-            .Case([&](LLVM::MemcpyOp op) { return expensiveCycle; })
-            .Case([&](LLVM::MemmoveOp op) { return expensiveCycle; })
             .Case([&](LLVM::MemsetOp op) { return basicCycle; })
             .Case([&](LLVM::MinNumOp op) { return basicCycle; })
             .Case([&](LLVM::MinimumOp op) { return basicCycle; })
