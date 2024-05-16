@@ -1,8 +1,12 @@
 #ifndef MLIR_TRANSFORMS_GRAPHPARTITION_H_
 #define MLIR_TRANSFORMS_GRAPHPARTITION_H_
 
+#include "mlir/Analysis/CFGLoopInfo.h"
+#include "mlir/IR/Dominance.h"
+#include "mlir/Support/TypeID.h"
+#include <cstdint>
 #ifndef SIZE_TRANSFORM_PARAMETER
-#define SIZE_TRANSFORM_PARAMETER 3.2
+#define SIZE_TRANSFORM_PARAMETER 0.8
 #endif
 
 #include "mlir/IR/Block.h"
@@ -26,73 +30,103 @@ class Value;
 #define GEN_PASS_DECL_GRAPHPARTITION
 #include "mlir/Transforms/Passes.h.inc"
 
-// Class for blocks after eliminate control flow.
-class Node {
+/// Class for blocks after eliminating control flow.
+class OpNode {
 public:
-  void addBasicBlock(Block *);
+  /// Add a basic block to the `OpNode`.
+  void addBasicBlock(Block *block) { basicBlocks.push_back(block); };
 
-  // Calculate the block costs and add them to timingCost and spaceCost.
-  // This only calculates the cost of one block in the node.
-  void calculateCost(Block *, int64_t freeCycle, int64_t basicCycle,
+  /// Calculate the block costs and add them to timingCost and spaceCost.
+  /// This only calculates the cost of one block in the node.
+  void calculateCost(Block *, CFGLoopInfo &loopInfo, int64_t loopTimes,
+                     int64_t freeCycle, int64_t basicCycle,
                      int64_t expensiveCycle);
 
   void setLiveIn(const SmallPtrSet<Value, 16> &values) { inValues = values; }
   void setLiveOut(const SmallPtrSet<Value, 16> &values) { outValues = values; }
 
-  SmallVector<Block *, 8> getBasicBlocks() { return basicBlocks; }
   int64_t getTimingCost() { return timingCost; }
   int64_t getSpaceCost() { return spaceCost; }
 
+  SmallPtrSet<Value, 16> getInValues() { return inValues; }
+  SmallPtrSet<Value, 16> getOutValues() { return outValues; }
+
+  SmallVector<Block *, 8> getBasicBlocks() { return basicBlocks; }
+
+  bool emptyBasicBlocks() { return basicBlocks.empty(); }
+
 private:
-  void calculateSpaceCost(Block *);
+  void calculateSpaceCost(Block *block);
   // use -loop-times
-  void calculateTimingCost(Block *, int64_t, int64_t, int64_t);
+  void calculateTimingCost(Block *block, CFGLoopInfo &loopInfo,
+                           int64_t loopTimes, int64_t freeCycle,
+                           int64_t basicCycle, int64_t expensiveCycle);
 
 private:
-  // Control flow nodes containing minimum blocks without branches.
+  /// Control flow nodes containing minimum blocks without branches.
   SmallVector<Block *, 8> basicBlocks;
-  // dynamic instructions
-  unsigned long timingCost;
-  // static instructions
-  unsigned long spaceCost;
-  // The set of values that are live at the entry of the node.
+
+  /// The set of values that are live at the entry of the node.
   SmallPtrSet<Value, 16> inValues;
-  // The set of values that are live at the exit of the node.
+
+  /// The set of values that are live at the exit of the node.
   SmallPtrSet<Value, 16> outValues;
-  // Underlying constants for 'cost' values in this interface.
+
+  /// Cost of dynamic instructions.
+  int64_t timingCost = 0;
+
+  /// Cost of static instructions.
+  int64_t spaceCost = 0;
 };
 
-// The subgraph of graph, containing several nodes.
-class Subgraph {
-public:
-  SmallVector<Node *, 16> getNodes() { return nodes; }
-
-  void addNode(Node *node);
-  void removeNode(Node *node);
-
-private:
-  SmallVector<Node *, 16> nodes;
-  unsigned long timingCost;
-  unsigned long spaceCost;
+enum class GraphKInd {
+  TopGraph, // Top-level graph, containing several subgraphs.
+  Subgraph  // The subgraph, containing several `OpNode`s.
 };
 
+/// BasicGraph has two types, top graph and subgraph.
+/// -Top graph contains several subgraphs that kind are `Graph`.
+/// -Subgraph contains several `OpNode`s.
 class Graph {
+
 public:
-  void addNode(Node *node);
-  void addSubgraph(Subgraph *subgraph);
+  Graph(GraphKInd type) : graphType(type) {}
 
-  // Move the node from its local subgraph to the target subgraph
-  void moveNode(Node *node, Subgraph *targetSubgraph);
+  /// Returns true if this graph represents an `TopGrpah`.
+  bool isTopGraph() const { return graphType == GraphKInd::TopGraph; }
 
-  Subgraph *getSubgraph(Node *node);
+  /// Returns true if this graph represents an `Subgraph`.
+  bool isSubgraph() const { return graphType == GraphKInd::Subgraph; }
+
+  SmallVector<OpNode *, 32> getOpNodes() { return opNodes; }
+  SmallVector<std::tuple<OpNode *, OpNode *>, 64> getOpNodeEdge() {
+    return opNodeEdges;
+  }
+
+  int64_t getTimingCost() { return timingCost; }
+  int64_t getSpaceCost() { return spaceCost; }
+
+  void addOpNodeAndEdge(OpNode *node, const SmallPtrSet<Value, 16> &values);
+  void popOpNodeEdge() { opNodeEdges.pop_back(); }
 
 private:
-  SmallVector<Node *, 64> nodes;
-  SmallVector<Subgraph *, 64> subgraphs;
+  GraphKInd graphType;
 
-  // Represent edges between nodes, the tuple consists of the source node and
-  // the destination node in sequence.
-  SmallVector<std::tuple<Node *, Node *>, 128> edges;
+  SmallVector<OpNode *, 32> opNodes;
+  SmallVector<Graph *, 32> subgraphs;
+
+  /// Represent edges between `opNode`s, the tuple consists of the source node
+  /// and the destination node in sequence.
+  SmallVector<std::tuple<OpNode *, OpNode *>, 64> opNodeEdges;
+  /// Represent edges between `Graph`s, the tuple consists of the source graph
+  /// and the destination graph in sequence.
+  SmallVector<std::tuple<Graph *, Graph *>, 64> subgraphEdges;
+
+  /// Cost of dynamic instructions.
+  int64_t timingCost = 0;
+
+  /// Cost of static instructions.
+  int64_t spaceCost = 0;
 };
 
 /// Creates a pass to subgraph op graphs.

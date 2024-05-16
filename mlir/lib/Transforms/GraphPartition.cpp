@@ -1,6 +1,7 @@
 #include "mlir/Transforms/GraphPartition.h"
 
 #include "mlir-c/IR.h"
+#include "mlir/Analysis/CFGLoopInfo.h"
 #include "mlir/Analysis/Liveness.h"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -24,12 +25,15 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Analysis/CostModel.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/IntrinsicsMips.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/GenericDomTree.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdint>
 #include <memory>
@@ -47,73 +51,80 @@ using namespace mlir;
 namespace {
 
 class PartitionPass : public impl::GraphPartitionBase<PartitionPass> {
-  using CFNode = std::vector<Block *>;
   using BlockEdge = std::tuple<Block *, Block *>;
 
 public:
   PartitionPass(raw_ostream &os) : os(os) {}
   PartitionPass(const PartitionPass &o) : PartitionPass(o.os.getOStream()) {}
 
-  Block *addBlock(Block *block, CFNode &cfn, DominanceInfo &domInfo,
-                  PostDominanceInfo &postDomInfo) {
-    Block *endBlock = nullptr;
+  /// Add blocks based on dominant information to eliminate control flow.
+  /// Add the begin block and its successors to the node.
+  void addBlock(Block *block, OpNode *node, DominanceInfo &domInfo,
+                PostDominanceInfo &postDomInfo, CFGLoopInfo &loopInfo) {
 
     if (visitedBlock[block])
-      return nullptr;
+      return;
 
-    // Add block to CFNode.
-    cfn.push_back(block);
+    // Analyze dominance and post-dominance information between the begin block
+    // and the current block.
+    Block *beginBlock;
+    if (node->emptyBasicBlocks()) {
+      beginBlock = block;
+    } else {
+      beginBlock = node->getBasicBlocks().front();
+    }
+    auto isDom = domInfo.properlyDominates(beginBlock, block);
+    auto isPostDom = postDomInfo.properlyPostDominates(block, beginBlock);
+
+    // The block is the end block of node, exit recursion.
+    if (isDom && isPostDom) {
+      return;
+    }
+
+    // Add block to OpNode.
+    node->addBasicBlock(block);
+
     visitedBlock[block] = true;
 
-    auto *rootBlock = cfn.front();
-    auto isDom = domInfo.properlyDominates(rootBlock, block);
-    auto isPostDom = postDomInfo.properlyPostDominates(block, rootBlock);
+    //  Calculate the space and timing costs of the current block, and add them
+    //  to the cost of the node.
+    node->calculateCost(block, loopInfo, loopTimes, freeCycleCost,
+                        basicCycleCost, expensiveCycleCost);
 
-    if (isDom && isPostDom) {
-      cfn.pop_back();
-      visitedBlock[block] = false;
-      return block;
+    // The block is not the end block, so we need to traverse successors.
+    for (auto *suc : block->getSuccessors()) {
+      addBlock(suc, node, domInfo, postDomInfo, loopInfo);
     }
-    if (!isPostDom) {
-      for (auto *suc : block->getSuccessors()) {
-        if (auto *eb = addBlock(suc, cfn, domInfo, postDomInfo)) {
-          endBlock = eb;
-          // TODO: Results may not be the same for each loop.
-        }
-      }
-    }
-
-    return endBlock;
   }
 
-  void printControlFlowNodes() {
-    int index = 1;
+  // void printControlFlowNodes() {
+  //   int index = 1;
 
-    os << "digraph G {\n";
-    os.indent();
+  //   os << "digraph G {\n";
+  //   os.indent();
 
-    for (const auto &cfNode : cfNodes) {
-      os << "subgraph cluster_" << index << " {\n";
-      os.indent();
-      os << "label=\"Node " << index << "\";\n";
-      os << "color=red;\n";
-      for (auto *block : cfNode) {
-        os << "v" << blockToId[block] << " [label=\"bb" << blockToId[block]
-           << "\"];\n";
-      }
-      os.unindent();
-      os << "}\n";
-      index++;
-    }
+  //   for (const auto &cfNode : cfNodes) {
+  //     os << "subgraph cluster_" << index << " {\n";
+  //     os.indent();
+  //     os << "label=\"Node " << index << "\";\n";
+  //     os << "color=red;\n";
+  //     for (auto *block : cfNode) {
+  //       os << "v" << blockToId[block] << " [label=\"bb" << blockToId[block]
+  //          << "\"];\n";
+  //     }
+  //     os.unindent();
+  //     os << "}\n";
+  //     index++;
+  //   }
 
-    for (auto edge : blockEdges) {
-      os << "v" << blockToId[std::get<0>(edge)] << " -> v"
-         << blockToId[std::get<1>(edge)] << ";\n";
-    }
+  //   for (auto edge : blockEdges) {
+  //     os << "v" << blockToId[std::get<0>(edge)] << " -> v"
+  //        << blockToId[std::get<1>(edge)] << ";\n";
+  //   }
 
-    os.unindent();
-    os << "}\n";
-  }
+  //   os.unindent();
+  //   os << "}\n";
+  // }
 
   void runOnOperation() override {
     Operation *op = getOperation();
@@ -121,25 +132,6 @@ public:
     PassManager pm(op->getName());
 
     pm.addPass(createInlinerPass());
-
-    if (!mlir::succeeded(pm.run(op))) {
-      op->emitOpError() << "pipeline fail";
-    }
-
-    bool foundMainFunction = false;
-    op->walk([&](LLVM::LLVMFuncOp func) {
-      if (func.getName() != mainFunctionName) {
-        func.setPrivate();
-      } else {
-        foundMainFunction = true;
-      }
-    });
-    if (!foundMainFunction) {
-      mlir::emitError(op->getLoc(),
-                      "Main function " + mainFunctionName + " not found!\n");
-      return;
-    }
-
     pm.addPass(createCSEPass());
     pm.addPass(createControlFlowSinkPass());
     pm.addPass(createSCCPPass());
@@ -154,28 +146,38 @@ public:
     SymbolTable symbolTable(op);
 
     // 也许可以利用这个在 inline 后找到 main 函数分析，无需删除其他函数
-    // LLVM::LLVMFuncOp mainFunc =
-    //     symbolTable.lookup<LLVM::LLVMFuncOp>(mainFunctionName);
+    LLVM::LLVMFuncOp mainFunc =
+        symbolTable.lookup<LLVM::LLVMFuncOp>(mainFunctionName);
+    if (!mainFunc) {
+      mlir::emitError(op->getLoc(),
+                      "Main function " + mainFunctionName + " not found!\n");
+      return;
+    }
 
     // 打印指定function的op graph，以dot形式存储在文件中
     // mainFunc->getRegion(0).viewGraph();
 
-    llvm::errs() << "after-getNumRegions:" << op->getNumRegions() << "\n";
-
     // -----------------------------------------//
 
-    Liveness live(op);
+    // The highest level graph with several subgraphs.
+    Graph topGraph(GraphKInd::TopGraph);
+    // When initializing the graph, all nodes are in the same subgraph.
+    Graph subgraph(GraphKInd::Subgraph);
+    // Get live information of op.
+    Liveness live(mainFunc);
+    // Used to analyze dominant information.
+    DominanceInfo domInfo;
+    PostDominanceInfo postDomInfo;
 
-    op->walk([&](Block *block) {
-      DominanceInfo domInfo;
-      PostDominanceInfo postDomInfo;
-      CFNode cfn;
+    // Used to get blocks in all loop bodies.
+    llvm::DominatorTreeBase<Block, false> &domTree =
+        domInfo.getDomTree(&mainFunc->getRegion(0));
+    CFGLoopInfo loopInfo(domTree);
 
-      auto num = block->getOperations().size();
-      llvm::errs() << "code_size:" << num << "\n";
-
+    mainFunc->walk([&](Block *block) {
       blockToId[block] = numBlock++;
 
+      // 处理Block间的边，是否需要？用于dot
       for (auto *suc : block->getSuccessors()) {
         blockEdges.emplace_back(block, suc);
       }
@@ -183,35 +185,30 @@ public:
       if (visitedBlock[block])
         return;
 
-      addBlock(block, cfn, domInfo, postDomInfo);
+      OpNode *node = new OpNode;
 
-      // Don't include the end block that is in the next node.
-      cfNodes.push_back(cfn);
+      addBlock(block, node, domInfo, postDomInfo, loopInfo);
 
-      // llvm::errs() << "******************************\n";
-
-      // // block->dump();
-      // // llvm::errs() << "\n";
-
-      // // for (auto value : live.getLiveIn(block)) {
-      // //   value.dump();
-      // //   llvm::errs() << "\n";
-      // // }
-
-      // const auto &liveInValues = live.getLiveIn(block);
-      // // node.setLiveIn()
-
-      // llvm::errs() << "num-live-in-value:" << liveInValues.size() << "\n";
-      // llvm::errs() << "num-block:" << cfn.size() << "\n";
-
-      // llvm::errs() << "******************************\n";
+      subgraph.addOpNodeAndEdge(node, live.getLiveIn(block));
     });
 
-    // The last node is the whole function that needs to be popped.
-    cfNodes.pop_back();
-    // TODO: Handling redundant blocks instead of popping them up.
+    // Remove the last edge which doesn't have a destination.
+    subgraph.popOpNodeEdge();
 
-    // printControlFlowNodes();
+    // Print graph after initialization
+    llvm::errs() << "node-num:" << subgraph.getOpNodes().size() << "\n";
+    llvm::errs() << "edge-num:" << subgraph.getOpNodeEdge().size() << "\n";
+    llvm::errs() << "space:" << subgraph.getSpaceCost() << "\n";
+    llvm::errs() << "timing:" << subgraph.getTimingCost() << "\n";
+    for (auto *n : subgraph.getOpNodes()) {
+      llvm::errs() << "--------------------\n";
+      llvm::errs() << "space:" << n->getSpaceCost() << "\n";
+      llvm::errs() << "timing:" << n->getTimingCost() << "\n";
+      llvm::errs() << "num-blocks:" << n->getBasicBlocks().size() << "\n";
+      llvm::errs() << "num-in-values:" << n->getInValues().size() << "\n";
+      llvm::errs() << "num-out-values:" << n->getOutValues().size() << "\n";
+      llvm::errs() << "--------------------\n";
+    }
   }
 
 private:
@@ -220,14 +217,13 @@ private:
   /// Output stream to write DOT codes.
   raw_indented_ostream os;
 
-  /// A structure for storing control flow nodes.
-  std::vector<CFNode> cfNodes;
-
   std::vector<BlockEdge> blockEdges;
 
   DenseMap<Block *, bool> visitedBlock;
 
+  /// Used to generate DOT for graph.
   DenseMap<Block *, int> blockToId;
+
   int numBlock = 0;
 
   std::vector<LLVM::LLVMFuncOp> calleeList;
@@ -235,19 +231,22 @@ private:
 
 } // namespace
 
-void Node::calculateCost(Block *block, int64_t freeCycle, int64_t basicCycle,
-                         int64_t expensiveCycle) {
+void OpNode::calculateCost(Block *block, CFGLoopInfo &loopInfo,
+                           int64_t loopTimes, int64_t freeCycle,
+                           int64_t basicCycle, int64_t expensiveCycle) {
   calculateSpaceCost(block);
-  calculateTimingCost(block, freeCycle, basicCycle, expensiveCycle);
+  calculateTimingCost(block, loopInfo, loopTimes, freeCycle, basicCycle,
+                      expensiveCycle);
 }
 
-void Node::calculateSpaceCost(Block *block) {
-  spaceCost = block->getOperations().size() * SIZE_TRANSFORM_PARAMETER;
+void OpNode::calculateSpaceCost(Block *block) {
+  spaceCost += block->getOperations().size() * SIZE_TRANSFORM_PARAMETER;
 }
 
-void Node::calculateTimingCost(Block *block, int64_t freeCycle,
-                               int64_t basicCycle, int64_t expensiveCycle) {
-  timingCost = 0;
+void OpNode::calculateTimingCost(Block *block, CFGLoopInfo &loopInfo,
+                                 int64_t loopTimes, int64_t freeCycle,
+                                 int64_t basicCycle, int64_t expensiveCycle) {
+  int64_t blockTimingCost = 0;
   block->walk([&](Operation *op) {
     int64_t operationCost =
         TypeSwitch<Operation *, unsigned>(op)
@@ -341,8 +340,31 @@ void Node::calculateTimingCost(Block *block, int64_t freeCycle,
                   LLVM::vector_reduce_smax, LLVM::vector_reduce_smin,
                   LLVM::vector_reduce_xor>(
                 [&](auto op) { return expensiveCycle; });
-    timingCost += operationCost;
+    blockTimingCost += operationCost;
   });
+  // If the block is in a loop, multiply it by `loopTimes`.
+  if (auto *loop = loopInfo.getLoopFor(block)) {
+    blockTimingCost = pow(loopTimes, loop->getLoopDepth()) * blockTimingCost;
+  }
+  timingCost += blockTimingCost;
+}
+
+void Graph::addOpNodeAndEdge(OpNode *node,
+                             const SmallPtrSet<Value, 16> &values) {
+
+  // Add edge.
+  if (!opNodeEdges.empty()) {
+    std::get<1>(opNodeEdges.back()) = node;
+    // Set `outValues` for the previous node and set `inValues` for the current
+    // node.
+    opNodes.back()->setLiveOut(values);
+    node->setLiveIn(values);
+  }
+  opNodeEdges.emplace_back(node, nullptr);
+  // Add node.
+  opNodes.push_back(node);
+  timingCost += node->getTimingCost();
+  spaceCost += node->getSpaceCost();
 }
 
 std::unique_ptr<Pass> mlir::createGraphPartitionPass(raw_ostream &os) {
